@@ -2,29 +2,38 @@ var express           = require('express');
 var expressHandlebars = require('express-handlebars');
 var bodyParser        = require('body-parser');
 var mysql             = require('mysql');
+var session           = require('express-session')
+var Sequelize         = require('sequelize');
 var app               = express();
 
 const PORT = process.env.PORT || 8080;
+
+var sequelize = new Sequelize('Persons', 'root', 'password');
 
 app.use(bodyParser.urlencoded({extended: false}));
 app.engine('handlebars', expressHandlebars({defaultLayout: 'main'}));
 app.set('view engine', 'handlebars');
 
-var connection = mysql.createConnection({
-    host: 'localhost',
-    port: 3306,
-    user: 'root',
-    password: 'password',
-    database: 'users_db'
+var Person = sequelize.define('Person', {
+  email: {
+    type: Sequelize.STRING,
+    unique: true
+  },
+  password: Sequelize.STRING,
+  firstname: Sequelize.STRING,
+  lastname: Sequelize.STRING,
+  favfood: Sequelize.STRING,
+  age: Sequelize.INTEGER
 });
 
-connection.connect(function(err) {
-    if (err) {
-        console.error('error connecting: ' + err.stack);
-        return;
-    }
-    console.log('connected as id ' + connection.threadId);
-});
+app.use(session({
+  secret: 'elm i 8lsdjfklsjflkjsdfjsd',
+  cookie: {
+    maxAge: 1000 * 60 * 60 * 24 * 14
+  },
+  saveUninitialized: true,
+  resave: false
+}));
 
 app.get('/', function(req, res) {
   res.render('register');
@@ -35,27 +44,48 @@ app.get('/login', function(req, res) {
 });
 
 app.post('/register', function(req, res) {
-  connection.query('INSERT INTO users (fname, lname, email, password) VALUES (?, ?, ?, ?)', [req.body.fname, req.body.lname, req.body.email, req.body.password], function(err, result) {
-    if (err) throw err;
+  Person.create(req.body).then(function(user) {
+    console.log(user);
+    req.session.authenticated = user;
     res.redirect('/success');
+  }).catch(function(err) {
+    console.log(err);
+    res.redirect('/?msg=' + err.message);
   });
 });
 
 app.post('/login', function(req, res) {
-  connection.query('SELECT * FROM users WHERE email=? AND password=?', [req.body.email, req.body.password], function(err, result) {
-    if (err) throw err;
-    if(result.length > 0) {
-      res.send('you logged in');
-    } else {
-      res.redirect('/login');  
+  var email = req.body.email;
+  var password = req.body.password;
+
+  Person.findOne({
+    where: {
+      email: email,
+      password: password
     }
+  }).then(function(user) {
+    if(user) {
+      req.session.authenticated = user;
+      res.redirect('/success');
+    } else {
+      res.redirect('/?msg=You failed at life');
+    }
+  }).catch(function(err) {
+    throw err;
   });
 });
 
 app.get('/success', function(req, res) {
-  res.send('you successfully registered and i spelled successfully wrong');
+  if(req.session.authenticated) {
+    res.render('success');  
+  } else {
+    res.redirect('/');
+  }
+  
 });
 
-app.listen(PORT, function() {
-  console.log('Listening on %s', PORT);
+sequelize.sync().then(function() {
+  app.listen(PORT, function() {
+    console.log("LISTNEING!");
+  });
 });
